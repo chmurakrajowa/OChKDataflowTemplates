@@ -86,6 +86,8 @@ public class TextIOToBigQuery {
   private static final String NAME = "name";
   private static final String TYPE = "type";
   private static final String MODE = "mode";
+  private static final String TYPE_RECORD = "RECORD";
+  private static final String FIELDS = "fields";
 
   public static void main(String[] args) {
     Options options = PipelineOptionsFactory.fromArgs(args).withValidation().as(Options.class);
@@ -111,30 +113,12 @@ public class TextIOToBigQuery {
                           public TableSchema apply(String jsonPath) {
 
                             TableSchema tableSchema = new TableSchema();
-                            List<TableFieldSchema> fields = new ArrayList<>();
                             SchemaParser schemaParser = new SchemaParser();
                             JSONObject jsonSchema;
 
                             try {
-
                               jsonSchema = schemaParser.parseSchema(jsonPath);
-
-                              JSONArray bqSchemaJsonArray =
-                                  jsonSchema.getJSONArray(BIGQUERY_SCHEMA);
-
-                              for (int i = 0; i < bqSchemaJsonArray.length(); i++) {
-                                JSONObject inputField = bqSchemaJsonArray.getJSONObject(i);
-                                TableFieldSchema field =
-                                    new TableFieldSchema()
-                                        .setName(inputField.getString(NAME))
-                                        .setType(inputField.getString(TYPE));
-
-                                if (inputField.has(MODE)) {
-                                  field.setMode(inputField.getString(MODE));
-                                }
-
-                                fields.add(field);
-                              }
+                              List<TableFieldSchema> fields = parseArray(jsonSchema, BIGQUERY_SCHEMA);
                               tableSchema.setFields(fields);
 
                             } catch (Exception e) {
@@ -149,5 +133,35 @@ public class TextIOToBigQuery {
                 .withCustomGcsTempLocation(options.getBigQueryLoadingTemporaryDirectory()));
 
     pipeline.run();
+  }
+
+  private static List<TableFieldSchema> parseArray(JSONObject currentObject, String arrayFieldName) {
+    JSONArray bqSchemaJsonArray = currentObject.getJSONArray(arrayFieldName);
+    List<TableFieldSchema> fields = new ArrayList<>();
+
+    for (int i = 0; i < bqSchemaJsonArray.length(); i++) {
+      TableFieldSchema field = parseField(bqSchemaJsonArray, i);
+      fields.add(field);
+    }
+
+    return fields;
+  }
+
+  private static TableFieldSchema parseField(JSONArray bqSchemaJsonArray, int i) {
+    JSONObject inputField = bqSchemaJsonArray.getJSONObject(i);
+
+    TableFieldSchema field = new TableFieldSchema()
+        .setName(inputField.getString(NAME))
+        .setType(inputField.getString(TYPE));
+
+    if (inputField.has(MODE)) {
+      field.setMode(inputField.getString(MODE));
+    }
+
+    if (TYPE_RECORD.equals(inputField.getString(TYPE))) {
+      List<TableFieldSchema> nestedFields = parseArray(inputField, FIELDS);
+      field.setFields(nestedFields);
+    }
+    return field;
   }
 }
